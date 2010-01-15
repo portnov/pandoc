@@ -58,6 +58,7 @@ module Text.Pandoc
                -- * Definitions
                module Text.Pandoc.Definition
                -- * Readers: converting /to/ Pandoc format
+               , readAsciidoc
                , readMarkdown
                , readRST
                , readLaTeX
@@ -85,6 +86,7 @@ module Text.Pandoc
                , writeOpenDocument
                , writeMan
                , writeMediaWiki
+               , writeConfluence
                , writeRTF
                , prettyPandoc
                -- * Writer options used in writers 
@@ -99,6 +101,7 @@ module Text.Pandoc
 
 import Text.Pandoc.Definition
 import Text.Pandoc.Readers.Markdown
+import Text.Pandoc.Readers.Asciidoc
 import Text.Pandoc.Readers.RST
 import Text.Pandoc.Readers.LaTeX
 import Text.Pandoc.Readers.HTML
@@ -114,6 +117,7 @@ import Text.Pandoc.Writers.OpenDocument
 import Text.Pandoc.Writers.Man
 import Text.Pandoc.Writers.RTF 
 import Text.Pandoc.Writers.MediaWiki
+import Text.Pandoc.Writers.Confluence
 import Text.Pandoc.Templates
 import Text.Pandoc.Shared
 import Data.Version (showVersion)
