@@ -20,10 +20,10 @@ blockquote :: Block -> String
 blockquote block = para $ "bq. "++confBlock block ++ "\n"
 
 oListItem :: [Block] -> String
-oListItem blocks = " # "++confBlocks blocks ++ "\n"
+oListItem blocks = " # "++(strip $ confBlocks blocks) ++ "\n"
 
 bListItem :: [Block] -> String
-bListItem blocks = " * "++confBlocks blocks ++ "\n"
+bListItem blocks = " * "++(strip $ confBlocks blocks) ++ "\n"
 
 strip :: String -> String
 strip = t . reverse . t .reverse
@@ -58,7 +58,9 @@ confBlock (Table caption _ _ headers rows) =
     ++ "||" ++ (intercalate "||" $ map confBlocks headers) ++ "||\n"
     ++ unlines ["|" ++ (intercalate "|" $ map confBlocks cells) ++ "|\n" | cells <- rows]
     ++ "\n"
+confBlock HorizontalRule = "----\n"
 confBlock Null = ""
+confBlock x = error $ "Unsupported block: " ++ show x
 
 quoteWith :: String -> [Inline] -> String
 quoteWith s lst = s ++ confInlines lst ++ s
