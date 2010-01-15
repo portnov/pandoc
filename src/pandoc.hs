@@ -88,6 +88,7 @@ wrapWords c = wrap' c c where
 readers :: [(String, ParserState -> String -> Pandoc)]
 readers = [("native"       , readPandoc)
           ,("markdown"     , readMarkdown)
+          ,("asciidoc"     , readAsciidoc)
           ,("markdown+lhs" , readMarkdown)
           ,("rst"          , readRST)
           ,("rst+lhs"      , readRST)
@@ -120,6 +121,7 @@ writers = [("native"       , writeDoc)
           ,("rst"          , writeRST)
           ,("rst+lhs"      , writeRST)
           ,("mediawiki"    , writeMediaWiki)
+          ,("confluence"   , writeConfluence)
           ,("rtf"          , writeRTF)
           ]
 
