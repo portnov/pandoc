@@ -135,7 +135,7 @@ newlines ::  String
 newlines = ['\n', chr 13]
 
 headerChars ::  M.Map Int Char
-headerChars = M.fromList [(1,'='), (2,'-'), (3,'~'), (4,'~')]
+headerChars = M.fromList [(1,'='), (2,'-'), (3,'~'), (4,'^')]
 
 quotedBy ::  Char -> QuoteType -> GenParser Char st Inline
 quotedBy c t = try $ do

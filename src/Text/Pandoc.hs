@@ -86,6 +86,7 @@ module Text.Pandoc
                , writeOpenDocument
                , writeMan
                , writeMediaWiki
+               , writeAsciidoc
                , writeConfluence
                , writeRTF
                , prettyPandoc
@@ -117,6 +118,7 @@ import Text.Pandoc.Writers.OpenDocument
 import Text.Pandoc.Writers.Man
 import Text.Pandoc.Writers.RTF 
 import Text.Pandoc.Writers.MediaWiki
+import Text.Pandoc.Writers.Asciidoc
 import Text.Pandoc.Writers.Confluence
 import Text.Pandoc.Templates
 import Text.Pandoc.Shared
