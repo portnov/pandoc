@@ -122,6 +122,7 @@ writers = [("native"       , writeDoc)
           ,("rst+lhs"      , writeRST)
           ,("mediawiki"    , writeMediaWiki)
           ,("confluence"   , writeConfluence)
+          ,("asciidoc"     , writeAsciidoc)
           ,("rtf"          , writeRTF)
           ]
 
