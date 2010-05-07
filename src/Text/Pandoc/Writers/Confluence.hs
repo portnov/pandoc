@@ -59,6 +59,7 @@ confBlock (Table caption _ _ headers rows) =
     ++ unlines ["|" ++ (intercalate "|" $ map confBlocks cells) ++ "|\n" | cells <- rows]
     ++ "\n"
 confBlock HorizontalRule = "----\n"
+confBlock (CodeBlock _ code) = unlines ["{noformat}", code, "{noformat}"]
 confBlock Null = ""
 confBlock x = error $ "Unsupported block: " ++ show x
 
