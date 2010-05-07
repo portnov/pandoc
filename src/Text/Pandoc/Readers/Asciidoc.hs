@@ -178,7 +178,7 @@ pAttributes = do
   char '['
   l <- pManyAttrs
   char ']'
-  pNewLine
+  optional pNewLine
   return l
 
 pAnchor ::  AParser (String)
@@ -375,8 +375,8 @@ pBlockTitle = do
 pAttributed :: AParser t -> AParser (Attributed t)
 pAttributed p = do
   an <- maybeP pAnchor
-  at <- option [] (try pAttributes)
   tt <- maybeP pBlockTitle 
+  at <- option [] (try pAttributes)
   r <- p
   return $ Attributed an at tt r
 
@@ -465,7 +465,7 @@ pTable = do
   pTableDelimiter 
   rows <- pTableRow `manyTill` (try pTableDelimiter)
 --   pTableDelimiter 
-  many1 pNewLine
+  many pNewLine
   return $ Table rows
 
 pEmail ::  GenParser Char st String
@@ -517,7 +517,7 @@ pDocumentHeader = do
     return (h,p)
 
 body ::  GenParser Char () [Attributed Block]
-body = many1 $ choice $ map (try.pAttributed) [
+body = many1 $ choice $ map (try . pAttributed) [
     pAnyHeader,
     pTable,
     pNumberedList,
