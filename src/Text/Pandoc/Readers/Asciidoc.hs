@@ -9,7 +9,6 @@ import Control.Arrow
 import Control.Monad (when,liftM)
 import Data.Char
 import Data.Maybe
-import Data.Either
 import Data.List
 import Data.Function (on)
 import qualified Data.Map as M
@@ -18,8 +17,6 @@ import Text.ParserCombinators.Parsec
 -- import qualified Text.Pandoc as Pandoc
 import qualified Text.Pandoc.Definition as P
 import Text.Pandoc.Shared (ParserState)
-
-type AParser r = GenParser Char () r
 
 data Author = Author { firstName :: String, secondName :: String, surName :: String, email :: String }
 
@@ -108,9 +105,6 @@ instance Show Block where
 showL ::  (Show a) => [a] -> String
 showL lst = intercalate " " (map show lst)++"\n"
 
-showE ::  (Show a, Show a1) => Either a [a1] -> String
-showE = either show showL
-
 maybeP ::  GenParser tok st a -> GenParser tok st (Maybe a)
 maybeP p = 
     let tmp = p >>= (return . Just)
@@ -125,7 +119,7 @@ toEnd p = do
 untitled ::  Attributed Block
 untitled = woAttributes $ Header 1 ""
 
-whitespace ::  GenParser Char st String
+whitespace ::  Parser String
 whitespace = many1 $ oneOf " \t"
 
 (!) ::  (Ord k) => M.Map k a -> k -> a
@@ -137,7 +131,7 @@ newlines = ['\n', chr 13]
 headerChars ::  M.Map Int Char
 headerChars = M.fromList [(1,'='), (2,'-'), (3,'~'), (4,'^')]
 
-quotedBy ::  Char -> QuoteType -> GenParser Char st Inline
+quotedBy ::  Char -> QuoteType -> Parser Inline
 quotedBy c t = try $ do
     char c
     text <- many1 $ noneOf [c,'\n']
@@ -145,7 +139,7 @@ quotedBy c t = try $ do
     many $ oneOf " \t"
     return $ Quoted t text
 
-pQuoted ::  GenParser Char st Inline
+pQuoted ::  Parser Inline
 pQuoted = (quotedBy '*' Strong)
       <|> (quotedBy '\'' Emphasis)
       <|> (quotedBy '_' Emphasis)
@@ -154,26 +148,26 @@ pQuoted = (quotedBy '*' Strong)
       <|> (quotedBy '+' Mono)
       <|> (quotedBy '#' Unquoted)
 
-pNewLine' ::  GenParser Char st String
+pNewLine' ::  Parser String
 pNewLine' = ((try $ string "\n\r") <|> (try $ string "\r\n") <|> (string "\n")) <?> "newline"
 
-pNewLine ::  CharParser st String
+pNewLine ::  Parser String
 pNewLine = pNewLine' >> (many $ oneOf " \t")
 
-quoted ::  AParser String
+quoted ::  Parser String
 quoted = between (char '"') (char '"') (many $ noneOf "\"")
 
-pOneAttrib ::  AParser (String, String)
+pOneAttrib ::  Parser (String, String)
 pOneAttrib = do
   name <- many1 $ noneOf "="
   char '='
   value <- quoted
   return (name, value)
 
-pManyAttrs ::  AParser [(String, String)]
+pManyAttrs ::  Parser [(String, String)]
 pManyAttrs = pOneAttrib `sepBy` (char ',')
 
-pAttributes ::  AParser [(String, String)]
+pAttributes ::  Parser [(String, String)]
 pAttributes = do
   char '['
   l <- pManyAttrs
@@ -181,7 +175,7 @@ pAttributes = do
   optional pNewLine
   return l
 
-pAnchor ::  AParser (String)
+pAnchor ::  Parser (String)
 pAnchor = do
   string "[["
   text <- many1 $ noneOf "]"
@@ -189,13 +183,19 @@ pAnchor = do
   pNewLine
   return text
 
-pPlainText ::  GenParser Char st Inline
+pPlainText ::  Parser Inline
 pPlainText = do
     text <- many1 $ noneOf " \t*#'~\n\r"
     optional whitespace
     return $ Text text
 
-pMacro ::  AParser Inline
+pCellText :: Parser Inline
+pCellText = do
+    text <- many1 $ noneOf "| \t*#'~\n\r"
+    optional whitespace
+    return $ Text text
+
+pMacro ::  Parser Inline
 pMacro = do
   name <- many1 alphaNum
   char ':'
@@ -206,7 +206,7 @@ pMacro = do
   optional whitespace
   return $ Macro name arg1 [args]
 
-pInternalLink ::  GenParser Char st Inline
+pInternalLink ::  Parser Inline
 pInternalLink = do
   string "<<"
   href <- many1 $ noneOf ",\n"
@@ -216,7 +216,7 @@ pInternalLink = do
   optional whitespace
   return $ InternalLink href title
 
-inline ::  GenParser Char () Inline
+inline ::  Parser Inline
 inline = do
 --     many $ oneOf " \t"
     (try pQuoted)
@@ -224,19 +224,25 @@ inline = do
     <|> (try pMacro)
     <|> pPlainText
 
-pNormalLine ::  GenParser Char () [Inline]
+cellInline :: Parser Inline
+cellInline = try pQuoted
+         <|> try pInternalLink
+         <|> try pMacro
+         <|> pCellText
+
+pNormalLine ::  Parser [Inline]
 pNormalLine = do 
   text <- many1 inline
   pNewLine
   return text
 
-pCommentLine ::  GenParser Char st [a]
+pCommentLine ::  Parser [a]
 pCommentLine = do
   string "//"
   anyChar `manyTill` pNewLine
   return []
 
-pAttributeLine :: GenParser Char st [a]
+pAttributeLine :: Parser [a]
 pAttributeLine = do
   char ':'
   many1 alphaNum
@@ -245,37 +251,37 @@ pAttributeLine = do
   anyChar `manyTill` pNewLine
   return []
 
-pAttributesPara :: GenParser Char () [a]
+pAttributesPara :: Parser [a]
 pAttributesPara = do
   many1 pAttributeLine
   many pNewLine
   return []
 
-pLine ::  GenParser Char () [Inline]
+pLine ::  Parser [Inline]
 pLine = pAttributeLine <|> pCommentLine <|> pNormalLine 
 
 concatP ::  (Monad m) => m [[a]] -> m [a]
 concatP = liftM concat
 
-pCodeLine ::  Int -> GenParser Char st String
+pCodeLine ::  Int -> Parser String
 pCodeLine n = do
   string $ replicate n ' '
   line <- anyChar `manyTill` pNewLine'
   return line
 
-pCode ::  GenParser Char st Block
+pCode ::  Parser Block
 pCode = do
   lst <- choice $ map (many1 . pCodeLine) [2..8]
   many1 pNewLine'
   return $ Code lst
 
-pParagraph ::  AParser Block
+pParagraph ::  Parser Block
 pParagraph = do
     t <- concatP $ many1 pLine
     many1 pNewLine'
     return $ Para t
 
-pAdmParagraph ::  GenParser Char () Block
+pAdmParagraph ::  Parser Block
 pAdmParagraph = do
     t <- choice $ map (try.string) ["NOTE","TIP","IMPORTANT","CAUTION","WARNING","TODO"]
     char ':'
@@ -284,10 +290,10 @@ pAdmParagraph = do
     many1 pNewLine
     return $ AdmPara (read t) text
 
-pAnyParagraph ::  GenParser Char () Block
+pAnyParagraph ::  Parser Block
 pAnyParagraph = (try pCode) <|> (try pAdmParagraph) <|> pParagraph
 
-pBulletedListItem ::  Char -> GenParser Char () ListItem
+pBulletedListItem ::  Char -> Parser ListItem
 pBulletedListItem c = do
   many $ oneOf " \t"
   cc <- many1 $ char c
@@ -296,7 +302,7 @@ pBulletedListItem c = do
   item <- inline `manyTill` pNewLine
   return $ ListItem n item 
 
-pNumberedListItem ::  GenParser Char () [Inline]
+pNumberedListItem ::  Parser [Inline]
 pNumberedListItem = do
   many $ oneOf " \t"
   many1 digit
@@ -305,7 +311,7 @@ pNumberedListItem = do
   lst <- inline `manyTill` pNewLine
   return lst
 
-pDefListItem ::  GenParser Char () ([Inline], [Inline])
+pDefListItem ::  Parser ([Inline], [Inline])
 pDefListItem = do
   term <- inline `manyTill` (string "::")
   many $ oneOf " \t"
@@ -328,25 +334,25 @@ sameLevel = (==) `on` lstLevel
 listTransform ::  [ListItem] -> [ListNode]
 listTransform = lstChildren . unfoldTree (\(s:ss) -> (lstLine s, splitBy (sameLevel (head ss)) ss)) . (ListItem 0 []:)
 
-pBulletedList ::  GenParser Char () Block
+pBulletedList ::  Parser Block
 pBulletedList = do
     lst <- choice $ map many1 $ [pBulletedListItem '*', pBulletedListItem '-', pBulletedListItem '.']
     many pNewLine
     return $ BulletedList $ listTransform lst
 
-pNumberedList ::  GenParser Char () Block
+pNumberedList ::  Parser Block
 pNumberedList = do
     lst <- many1 pNumberedListItem
     many1 pNewLine
     return $ NumberedList lst
 
-pDefList ::  GenParser Char () Block
+pDefList ::  Parser Block
 pDefList = do
     lst <- many1 pDefListItem
     many1 pNewLine
     return $ DefList lst
 
-pDelimitedBlock ::  Char -> GenParser Char () Block
+pDelimitedBlock ::  Char -> Parser Block
 pDelimitedBlock c = do
     del <- many1 (char c)
     let n = length del
@@ -358,7 +364,7 @@ pDelimitedBlock c = do
     many pNewLine
     return $ Delimited c lst
 
-pAnyDelimitedBlock ::  GenParser Char () Block
+pAnyDelimitedBlock ::  Parser Block
 pAnyDelimitedBlock = 
       (pDelimitedBlock '=') 
   <|> (pDelimitedBlock '-')
@@ -366,13 +372,13 @@ pAnyDelimitedBlock =
   <|> (pDelimitedBlock '+')
   <|> (pDelimitedBlock '/')
 
-pBlockTitle ::  GenParser Char st [Char]
+pBlockTitle ::  Parser [Char]
 pBlockTitle = do
   char '.'
   title <- anyChar `manyTill` pNewLine
   return title
   
-pAttributed :: AParser t -> AParser (Attributed t)
+pAttributed :: Parser t -> Parser (Attributed t)
 pAttributed p = do
   an <- maybeP pAnchor
   tt <- maybeP pBlockTitle 
@@ -380,20 +386,20 @@ pAttributed p = do
   r <- p
   return $ Attributed an at tt r
 
-pAnyHeader ::  AParser Block
+pAnyHeader ::  Parser Block
 pAnyHeader = (try $ pHeader 1) <|> (try $ pHeader 2) <|> (try $ pHeader 3) <|> (try $ pHeader 4)
 
-pHeader ::  Int -> GenParser Char st Block
+pHeader ::  Int -> Parser Block
 pHeader l = (pOneLineHeader l) <|> (pTwoLineHeader l $ headerChars ! l)
 
-pOneLineHeader ::  Int -> GenParser Char st Block
+pOneLineHeader ::  Int -> Parser Block
 pOneLineHeader l = do
     (string $ (replicate l '=') ++ " ") <?> "one-line header marker"
     text <- many1 (noneOf newlines)
     many1 pNewLine
     return $ Header l text
 
-pTwoLineHeader ::  Int -> Char -> GenParser Char st Block
+pTwoLineHeader ::  Int -> Char -> Parser Block
 pTwoLineHeader l c = do
     text <- many1 (noneOf newlines)
     pNewLine
@@ -403,14 +409,14 @@ pTwoLineHeader l c = do
     many pNewLine
     return $ Header l text
 
-pTableDelimiter ::  GenParser Char st Int
+pTableDelimiter ::  Parser Int
 pTableDelimiter = do
   char '|'
   d <- many1 $ char '='
   pNewLine
   return $ length d
 
-pCellSpanSpec :: GenParser Char st (Int, Int, Char)
+pCellSpanSpec :: Parser (Int, Int, Char)
 pCellSpanSpec = do
   (cs,rs) <- pCellSpan
   c <- (char '+') <|> (char '*')
@@ -419,7 +425,7 @@ pCellSpanSpec = do
 pCellAlignChar ::  CharParser st Char
 pCellAlignChar = oneOf "<^>"
 
-pCellAlign ::  GenParser Char st (Char, Char)
+pCellAlign ::  Parser (Char, Char)
 pCellAlign = do
   hor <- pCellAlignChar
   vert <- option '<' $ try $ do
@@ -427,7 +433,7 @@ pCellAlign = do
       pCellAlignChar 
   return (hor,vert)
 
-pCellSpan ::  GenParser Char st (Int, Int)
+pCellSpan ::  Parser (Int, Int)
 pCellSpan = do
     cs <- many1 digit
     rs <- option 1 $ try $ do
@@ -436,31 +442,28 @@ pCellSpan = do
         return $ read ns
     return (read cs,rs)
 
-pCellStyle ::  GenParser Char st [Char]
+pCellStyle ::  Parser String
 pCellStyle = many1 alphaNum
 
 ignore m = m >> (return ())
 
-pCell ::  GenParser Char st Cell
+pCell ::  Parser Cell
 pCell = do
-    (colspan, rowspan, spantype) <- option (1,1,'+') $ try pCellSpanSpec
-    (horalign,vertalign) <- option ('<','^') $ try pCellAlign
-    style <- option "default" $ try pCellStyle
-    char '|'
-    whitespace
-    content <- many1 $ noneOf "<^>|\n"
---     content <- anyChar `manyTill` ((try $ ignore pCell) <|> (try $ ignore $ oneOf "\r\n"))
-    case parse (many1 $ try inline) "table cell" content of
-      Right lst -> return $ Cell colspan rowspan spantype horalign vertalign style lst
-      Left _ -> fail "Could not parse table cell content"
+    (colspan, rowspan, spantype) <- (option (1,1,'+') $ try pCellSpanSpec) <?> "cell span spec"
+    (horalign,vertalign) <- (option ('<','^') $ try pCellAlign) <?> "cell align"
+--     style <- option "default" $ try pCellStyle
+    char '|' <?> "cell separator"
+    whitespace <|> pNewLine
+    content <- many (try cellInline)
+    many whitespace
+    return $ Cell colspan rowspan spantype horalign vertalign "" content
 
-pTableRow ::  GenParser Char st [Cell]
+pTableRow ::  Parser [Cell]
 pTableRow = do
-  cells <- many1 pCell
-  pNewLine
+  cells <- pCell `manyTill` pNewLine
   return cells
 
-pTable ::  GenParser Char st Block
+pTable ::  Parser Block
 pTable = do
   pTableDelimiter 
   rows <- pTableRow `manyTill` (try pTableDelimiter)
@@ -468,7 +471,7 @@ pTable = do
   many pNewLine
   return $ Table rows
 
-pEmail ::  GenParser Char st String
+pEmail ::  Parser String
 pEmail = do
   char '<'
   user <- many1 (oneOf ".-" <|> alphaNum)
@@ -477,7 +480,7 @@ pEmail = do
   char '>'
   return $ user ++ "@" ++ host
 
-pAuthor ::  GenParser Char st Author
+pAuthor ::  Parser Author
 pAuthor = do
   fname <- many1 (noneOf " \t")
   whitespace
@@ -489,7 +492,7 @@ pAuthor = do
   optional whitespace
   return $ Author fname sname srname mail
 
-pVersion ::  GenParser Char st Version
+pVersion ::  Parser Version
 pVersion = do
   char 'v'
   num <- many1 (noneOf ",\n")
@@ -501,7 +504,7 @@ pVersion = do
   descr <- many1 (noneOf newlines)
   return $ Version num date descr
 
-pPreamble ::  GenParser Char st Preamble
+pPreamble ::  Parser Preamble
 pPreamble = do
   a <- pAuthor
   pNewLine
@@ -509,14 +512,14 @@ pPreamble = do
   many1 pNewLine
   return $ Preamble (Just a) v
 
-pDocumentHeader :: GenParser Char () (Attributed Block, Maybe Preamble)
+pDocumentHeader :: Parser (Attributed Block, Maybe Preamble)
 pDocumentHeader = do
     optional pAttributesPara
     h <- pAttributed $ pHeader 1
     p <- maybeP pPreamble
     return (h,p)
 
-body ::  GenParser Char () [Attributed Block]
+body ::  Parser [Attributed Block]
 body = many1 $ choice $ map (try . pAttributed) [
     pAnyHeader,
     pTable,
@@ -526,7 +529,7 @@ body = many1 $ choice $ map (try . pAttributed) [
     pAnyDelimitedBlock,
     pAnyParagraph ]
 
-asciidoc :: GenParser Char () (Attributed Block, Maybe Preamble, [Attributed Block])
+asciidoc :: Parser (Attributed Block, Maybe Preamble, [Attributed Block])
 asciidoc = do
     pp <- maybeP pDocumentHeader
     let (h,p) = fromMaybe (untitled, Nothing) pp
@@ -581,12 +584,16 @@ toPandoc a (Table lst) = P.Table [] (map alignment $ head lst) [] [] [[pandocCel
 pandocInlineMap :: [String] -> [Inline] -> [P.Inline]
 pandocInlineMap ans = concatMap (pandocInline ans)
 
+getImg "" = ""
+getImg (':':s) = '/':s
+getImg s = '/': s
+
 pandocInline :: [String] -> Inline -> [P.Inline]
 pandocInline _ (Text s) = [P.Space, P.Str s]
 pandocInline _ (Macro name arg args) = 
     case name of
       "link" -> [P.Space, P.Link (map P.Str args) (getLinkFile arg,"")]
-      "image" -> [P.Image (map P.Str args) (arg,"")]
+      "image" -> [P.Image (map P.Str args) (getImg arg,"")]
       "include" -> [P.Space, P.Link [P.Str "Include:",P.Space, P.Str $ tail arg] (dropExtension $ tail arg,"")]
       _ -> []
 pandocInline _ (Quoted qt s) = 
@@ -611,10 +618,22 @@ getLink href = (dropExtension f) ++ a
   where
     (f,a) = span (/='#') href
 
+-- removeComments :: String -> String
+-- removeComments = unlines . map removeComment . lines
+--   where
+--     removeComment ('/':'/':_) = ""
+--     removeComment x           = x
+
+removeComments :: String -> String
+removeComments = unlines . filter isNotComment . lines
+  where
+    isNotComment ('/':'/':_) = False
+    isNotComment _           = True
+
 readAsciidoc :: ParserState -> String -> P.Pandoc
 readAsciidoc _ text = case parse asciidoc "<input>" text' of
     Left e -> error $ show e
     Right x -> pandoc x
   where
-    text' = text ++ "\n\n"
+    text' = removeComments (text ++ "\n\n")
 
