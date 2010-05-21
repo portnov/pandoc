@@ -26,7 +26,7 @@ bListItem :: [Block] -> String
 bListItem blocks = " * "++(strip $ confBlocks blocks) ++ "\n"
 
 strip :: String -> String
-strip = t . reverse . t .reverse
+strip = t . reverse . t . reverse
   where t = dropWhile isSpace
 
 strong :: String -> String
@@ -55,8 +55,8 @@ confBlock (DefinitionList lst) = para $ concatMap definition lst
 confBlock (Header n lst) = header n $ confInlines lst
 confBlock (Table caption _ _ headers rows) =
     (strong $ confInlines caption) ++ "\n"
-    ++ "||" ++ (intercalate "||" $ map confBlocks headers) ++ "||\n"
-    ++ unlines ["|" ++ (intercalate "|" $ map confBlocks cells) ++ "|\n" | cells <- rows]
+    ++ "||" ++ (intercalate "||" $ map (strip . confBlocks) headers) ++ "||\n"
+    ++ unlines ["|" ++ (intercalate "|" $ map (strip . confBlocks) cells) ++ "|" | cells <- rows]
     ++ "\n"
 confBlock HorizontalRule = "----\n"
 confBlock (CodeBlock _ code) = unlines ["{noformat}", code, "{noformat}"]
