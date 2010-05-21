@@ -87,7 +87,7 @@ data Block  = Header Int String
             | BulletedList [ListNode]
             | NumberedList [TextLine]
             | DefList [(TextLine,TextLine)]
-            | Table [[Cell]]
+            | Table [Cell] [[Cell]]
             | Delimited Char [TextLine]
 
 instance Show Block where
@@ -98,7 +98,7 @@ instance Show Block where
   show (BulletedList lst) = "\n{"++ concatMap (\l -> " * "++show l++"\n") lst ++ "}\n"
   show (NumberedList lst) = "\n"++ concatMap (\l -> " # "++show l++"\n") lst ++ "\n"
   show (DefList lst) = "\n"++ concatMap (\(t,d) -> show t++" :: "++show d++"\n") lst ++ "\n"
-  show (Table lst) = show lst
+  show (Table _ lst) = show lst
   show (Delimited c lst) = del ++ show lst ++ "\n" ++ del
       where del = replicate 5 c ++ "\n"
 
@@ -394,12 +394,12 @@ pBlockTitle = do
   title <- anyChar `manyTill` pNewLine
   return title
   
-pAttributed :: Parser t -> Parser (Attributed t)
+pAttributed :: (Attributes -> Parser t) -> Parser (Attributed t)
 pAttributed p = do
   an <- maybeP pAnchor
   tt <- maybeP pBlockTitle 
   at <- option [] (try pAttributes)
-  r <- p
+  r <- p at
   return $ Attributed an at tt r
 
 pAnyHeader ::  Parser Block
@@ -492,12 +492,14 @@ pTableRow = do
   cells <- pCell `manyTill` pNewLine
   return cells
 
-pTable ::  Parser Block
-pTable = do
+pTable :: Attributes -> Parser Block
+pTable attrs = do
   pTableDelimiter 
   rows <- pTableRow `manyTill` (try pTableDelimiter)
   many pNewLine
-  return $ Table rows
+  case lookup "options" attrs of
+    Just "header" -> return $ Table (head rows) (tail rows)
+    _             -> return $ Table [] rows
 
 pEmail ::  Parser String
 pEmail = do
@@ -543,19 +545,19 @@ pPreamble = do
 pDocumentHeader :: Parser (Attributed Block, Maybe Preamble)
 pDocumentHeader = do
     optional pAttributesPara
-    h <- pAttributed $ pHeader 1
+    h <- pAttributed $ (const $ pHeader 1)
     p <- maybeP pPreamble
     return (h,p)
 
 body ::  Parser [Attributed Block]
 body = many1 $ choice $ map (try . pAttributed) [
-    pAnyHeader,
+    const pAnyHeader,
     pTable,
-    pNumberedList,
-    pBulletedList,
-    pDefList,
-    pAnyDelimitedBlock,
-    pAnyParagraph ]
+    const pNumberedList,
+    const pBulletedList,
+    const pDefList,
+    const pAnyDelimitedBlock,
+    const pAnyParagraph ]
 
 asciidoc :: Parser (Attributed Block, Maybe Preamble, [Attributed Block])
 asciidoc = do
@@ -600,7 +602,7 @@ toPandoc a (BulletedList lst) = P.BulletList $ map (pandocListItem a) lst
 toPandoc a (NumberedList lst) = P.OrderedList defListAttr [[P.Plain $ pandocInlineMap a item] | item <- lst]
 toPandoc a (DefList lst) = P.DefinitionList [(pandocInlineMap a t, [[P.Plain $ pandocInlineMap a d]]) | (t,d) <- lst]
 toPandoc a (Delimited c lst) = P.BlockQuote [P.Plain $ pandocInlineMap a line | line <- lst]
-toPandoc a (Table lst) = P.Table [] (map alignment $ head lst) [] [] [[pandocCell cell | cell <- row] | row <- lst]
+toPandoc a (Table hdr lst) = P.Table [] (map alignment $ head lst) [] (map pandocCell hdr) [[pandocCell cell | cell <- row] | row <- lst]
   where
     alignment (Cell _ _ _ h _ _ _) = alignment' h
     alignment' '<' = P.AlignLeft
