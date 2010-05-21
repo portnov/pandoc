@@ -57,7 +57,7 @@ data Inline = Macro { macroName :: String, macroArg :: String, macroArgs :: [Str
             | InternalLink String String
             | Text String
 
-data Cell = Cell Int Int Char Char Char String TextLine
+data Cell = Cell Int Int Char Char Char String [Block]
     deriving (Show)
 
 instance Show Inline where
@@ -120,7 +120,10 @@ untitled ::  Attributed Block
 untitled = woAttributes $ Header 1 ""
 
 whitespace ::  Parser String
-whitespace = many1 $ oneOf " \t"
+whitespace = (many1 $ oneOf " \t") <?> "whitespace"
+
+indent :: Parser String
+indent = (many $ oneOf " \t") <?> "indent"
 
 (!) ::  (Ord k) => M.Map k a -> k -> a
 (!) = (M.!)
@@ -238,15 +241,15 @@ pNormalLine = do
 
 pCommentLine ::  Parser [a]
 pCommentLine = do
-  string "//"
+  string "//" <?> "comment start marker"
   anyChar `manyTill` pNewLine
   return []
 
 pAttributeLine :: Parser [a]
 pAttributeLine = do
-  char ':'
+  char ':' <?> "attribute start marker"
   many1 alphaNum
-  char ':'
+  char ':' <?> "attribute separator"
   many $ oneOf " \n"
   anyChar `manyTill` pNewLine
   return []
@@ -265,7 +268,7 @@ concatP = liftM concat
 
 pCodeLine ::  Int -> Parser String
 pCodeLine n = do
-  string $ replicate n ' '
+  (string $ replicate n ' ') <?> (show n ++ " spaces")
   line <- anyChar `manyTill` pNewLine'
   return line
 
@@ -281,10 +284,14 @@ pParagraph = do
     many1 pNewLine'
     return $ Para t
 
+pCellParagraph :: Parser Block
+pCellParagraph = do
+    t <- concatP $ many1 pNormalLine 
+    return $ Para t
+
 pAdmParagraph ::  Parser Block
 pAdmParagraph = do
-    t <- choice $ map (try.string) ["NOTE","TIP","IMPORTANT","CAUTION","WARNING","TODO"]
-    char ':'
+    t <- choice $ map (try . string . (++":")) ["NOTE","TIP","IMPORTANT","CAUTION","WARNING","TODO"]
     whitespace
     text <- concatP $ many1 pLine
     many1 pNewLine
@@ -293,9 +300,18 @@ pAdmParagraph = do
 pAnyParagraph ::  Parser Block
 pAnyParagraph = (try pCode) <|> (try pAdmParagraph) <|> pParagraph
 
+pCellBlock :: Parser Block
+pCellBlock = choice $ map try $ [
+    pCellParagraph,
+    pCode,
+    pAdmParagraph,
+    pBulletedList,
+    pNumberedList,
+    pDefList ]
+
 pBulletedListItem ::  Char -> Parser ListItem
 pBulletedListItem c = do
-  many $ oneOf " \t"
+  indent
   cc <- many1 $ char c
   let n = length cc
   whitespace
@@ -304,7 +320,7 @@ pBulletedListItem c = do
 
 pNumberedListItem ::  Parser [Inline]
 pNumberedListItem = do
-  many $ oneOf " \t"
+  indent
   many1 digit
   char '.'
   whitespace
@@ -314,7 +330,7 @@ pNumberedListItem = do
 pDefListItem ::  Parser ([Inline], [Inline])
 pDefListItem = do
   term <- inline `manyTill` (string "::")
-  many $ oneOf " \t"
+  whitespace
   optional (pNewLine >> (many $ oneOf " \t"))
   def <- pLine
   return (term, def)
@@ -374,7 +390,7 @@ pAnyDelimitedBlock =
 
 pBlockTitle ::  Parser [Char]
 pBlockTitle = do
-  char '.'
+  char '.' <?> "block title marker"
   title <- anyChar `manyTill` pNewLine
   return title
   
@@ -429,7 +445,7 @@ pCellAlign ::  Parser (Char, Char)
 pCellAlign = do
   hor <- pCellAlignChar
   vert <- option '<' $ try $ do
-      char '.'
+      char '.' <?> "cell align separator"
       pCellAlignChar 
   return (hor,vert)
 
@@ -437,7 +453,7 @@ pCellSpan ::  Parser (Int, Int)
 pCellSpan = do
     cs <- many1 digit
     rs <- option 1 $ try $ do
-        char '.'
+        char '.' <?> "cell span separator"
         ns <- many1 digit
         return $ read ns
     return (read cs,rs)
@@ -445,6 +461,7 @@ pCellSpan = do
 pCellStyle ::  Parser String
 pCellStyle = many1 alphaNum
 
+ignore :: (Monad m) => m a -> m ()
 ignore m = m >> (return ())
 
 pCell ::  Parser Cell
@@ -453,10 +470,22 @@ pCell = do
     (horalign,vertalign) <- (option ('<','^') $ try pCellAlign) <?> "cell align"
 --     style <- option "default" $ try pCellStyle
     char '|' <?> "cell separator"
-    whitespace <|> pNewLine
-    content <- many (try cellInline)
+    content <- try pCellMultiline <|> pCellInline
     many whitespace
     return $ Cell colspan rowspan spantype horalign vertalign "" content
+  where
+    pCellInline = do
+      whitespace
+      c <- many (try cellInline)
+      many whitespace
+      return [Para c]
+    pCellMultiline = do
+      pNewLine
+      blocks <- ((try pCellBlock) `manyTill` (char '|')) <?> "blocks inside table cell"
+--       many pNewLine
+      inp <- getInput
+      setInput $ "\n|" ++ inp
+      return blocks
 
 pTableRow ::  Parser [Cell]
 pTableRow = do
@@ -467,7 +496,6 @@ pTable ::  Parser Block
 pTable = do
   pTableDelimiter 
   rows <- pTableRow `manyTill` (try pTableDelimiter)
---   pTableDelimiter 
   many pNewLine
   return $ Table rows
 
@@ -578,12 +606,15 @@ toPandoc a (Table lst) = P.Table [] (map alignment $ head lst) [] [] [[pandocCel
     alignment' '<' = P.AlignLeft
     alignment' '>' = P.AlignRight
     alignment' '^' = P.AlignCenter
+    alignment' _ = P.AlignLeft
     pandocCell (Cell _ _ _ _ _ _ lst) = cell' lst
-    cell' lst = [P.Plain $ pandocInlineMap a lst]
+--     cell' lst = [P.Plain $ pandocInlineMap a lst]
+    cell' blocks = map (toPandoc a) blocks
 
 pandocInlineMap :: [String] -> [Inline] -> [P.Inline]
 pandocInlineMap ans = concatMap (pandocInline ans)
 
+getImg :: String -> String
 getImg "" = ""
 getImg (':':s) = '/':s
 getImg s = '/': s
@@ -610,10 +641,12 @@ pandocInline anchors (InternalLink h t) =
       then [P.Space, P.Str t]                         -- so just put link title
       else [P.Space, P.Link [P.Str t] (getLink h,"")] -- try to support external links
 
+getLinkFile :: String -> String
 getLinkFile href = dropExtension f
   where
     (f,_) = span (/='#') href
 
+getLink :: String -> String
 getLink href = (dropExtension f) ++ a
   where
     (f,a) = span (/='#') href
