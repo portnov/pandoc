@@ -431,3 +431,9 @@ inlineToMarkdown _ (Note contents) = do
   st <- get
   let ref = show $ (length $ stNotes st)
   return $ text "[^" <> text ref <> char ']'
+inlineToMarkdown opts (Anchor target contents) = do
+  atext <- inlineListToMarkdown opts contents
+  return $ text "[#" <> text target <> char ']' <> atext
+inlineToMarkdown opts (InternalLink txt target) = do
+  ltext <- inlineListToMarkdown opts txt
+  return $ char '[' <> ltext <> text "](#" <> text target <> char ')'

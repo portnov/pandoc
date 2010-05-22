@@ -277,3 +277,7 @@ inlineToDocbook _ (Image _ (src, tit)) =
       titleDoc $$ selfClosingTag "imagedata" [("fileref", src)] 
 inlineToDocbook opts (Note contents) = 
   inTagsIndented "footnote" $ blocksToDocbook opts contents
+inlineToDocbook opts (Anchor target txt) = 
+  (inTags False "anchor" [("id", target)] empty) <> inlinesToDocbook opts txt
+inlineToDocbook opts (InternalLink txt target) =
+  inTags False "link" [("linkend", target)] $ inlinesToDocbook opts txt

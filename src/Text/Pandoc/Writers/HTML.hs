@@ -512,6 +512,12 @@ inlineToHtml opts inline =
                                            theclass "footnoteRef",
                                            prefixedId opts ("fnref" ++ ref)] << ref
     (Cite _ il)  -> inlineListToHtml opts il
+    (Anchor tgt txt) -> do
+                        atext <- inlineListToHtml opts txt
+                        return $ anchor ! [identifier tgt] $ atext
+    (InternalLink txt tgt) -> do
+                        ltext <- inlineListToHtml opts txt
+                        return $ anchor ! [href ("#" ++ tgt)] $ ltext
 
 blockListToNote :: WriterOptions -> String -> [Block] -> State WriterState Html
 blockListToNote opts ref blocks =

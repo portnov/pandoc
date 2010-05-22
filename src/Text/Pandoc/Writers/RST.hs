@@ -340,3 +340,9 @@ inlineToRST (Note contents) = do
   modify $ \st -> st { stNotes = contents:notes }
   let ref = show $ (length notes) + 1
   return $ text " [" <> text ref <> text "]_"
+inlineToRST (Anchor target txt) = do
+  atext <- inlineListToRST txt
+  return $ text ".. _" <> text target <> char '\n' <> atext
+inlineToRST (InternalLink txt target) = do
+  ltext <- inlineListToRST txt
+  return $ ltext <> char ' ' <> text target <> text "_. "
