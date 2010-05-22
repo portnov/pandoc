@@ -299,7 +299,7 @@ pAdmParagraph = do
     whitespace
     text <- concatP $ many1 pLine
     many1 pNewLine
-    return $ AdmPara (read t) text
+    return $ AdmPara (read $ init t) text
 
 pAnyParagraph ::  Parser Block
 pAnyParagraph = (try pCode) <|> (try pAdmParagraph) <|> pParagraph
