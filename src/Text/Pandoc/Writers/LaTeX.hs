@@ -349,3 +349,9 @@ inlineToLaTeX (Note contents) = do
   let optNewline = "\\end{Verbatim}" `isSuffixOf` rawnote
   return $ text "\\footnote{" <> 
            text rawnote <> (if optNewline then char '\n' else empty) <> char '}'
+inlineToLaTeX (Anchor target txt) = do
+  atext <- inlineListToLaTeX txt
+  return $ text "\\label{" <> text target <> text "} " <> atext
+inlineToLaTeX (InternalLink txt target) = do
+  ltext <- inlineListToLaTeX txt
+  return $ ltext <> text " \\ref{" <> text target <> char '}'
