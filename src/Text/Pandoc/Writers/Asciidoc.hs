@@ -26,9 +26,9 @@ para :: String -> String
 para text = "\n"++text++"\n"
 
 blockquote :: Block -> String
-blockquote block = para $ break++ascBlock block ++ break
+blockquote block = para $ separator ++ ascBlock block ++ separator
   where
-    break = "==================================="
+    separator = "==================================="
 
 oListItem :: [Block] -> String
 oListItem blocks = " # "++(strip $ ascBlocks blocks) ++ "\n"
@@ -43,6 +43,7 @@ strip = t . reverse . t .reverse
 strong :: String -> String
 strong text = "*"++(strip text)++"*"
 
+definition :: ([Inline], [[Block]]) -> String
 definition (term,def) = ascInlines term ++ " :: " ++ (unlines $ map ascBlocks def) ++ "\n"
 
 ascMeta :: Meta -> String
@@ -86,9 +87,10 @@ ascInline (Superscript lst) = quoteWith "^" lst
 ascInline (Subscript lst) = quoteWith "~" lst
 ascInline (SmallCaps lst) = ascInlines lst
 ascInline (Quoted t lst) = quoteWith qt lst
-  where qt | SingleQuote <- t = "'"
-           | DoubleQuote <- t = "\""
-ascInline (Cite tgt lst) = undefined
+  where qt = case t of
+              SingleQuote -> "'"
+              DoubleQuote -> "\""
+ascInline (Cite _ _) = undefined
 ascInline (Code s) = unlines $ map ("    "++) $ lines s
 ascInline Space = " "
 ascInline EmDash = "---"

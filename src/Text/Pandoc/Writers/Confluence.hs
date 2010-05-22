@@ -32,6 +32,7 @@ strip = t . reverse . t . reverse
 strong :: String -> String
 strong text = "*"++(strip text)++"*"
 
+definition :: ([Inline], [[Block]]) -> String
 definition (term,def) = (strong $ confInlines term) ++ "\n" ++ (unlines $ map confBlocks def) ++ "\n"
 
 confMeta :: Meta -> String
@@ -75,9 +76,10 @@ confInline (Superscript lst) = quoteWith "^" lst
 confInline (Subscript lst) = quoteWith "~" lst
 confInline (SmallCaps lst) = confInlines lst
 confInline (Quoted t lst) = quoteWith qt lst
-  where qt | SingleQuote <- t = "'"
-           | DoubleQuote <- t = "\""
-confInline (Cite tgt lst) = undefined
+  where qt = case t of
+              SingleQuote -> "'"
+              DoubleQuote -> "\""
+confInline (Cite _ _) = undefined
 confInline (Code s) = s                -- !?
 confInline Space = " "
 confInline EmDash = "---"
