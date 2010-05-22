@@ -55,7 +55,7 @@ instance (Show a) => Show (Attributed a) where
 
 data Inline = Macro String String [String] -- ^ macro name, first arg, other args
             | Quoted QuoteType String
-            | InternalLink String String
+            | InternalLink String String   -- ^ link target, link text
             | Text String
 
 data Cell = Cell Int Int Char Char Char String [Block]
@@ -594,9 +594,13 @@ pandocListItem a (ListNode item children) = [P.Plain $ pandocInlineMap a item, P
 
 toPandocA :: [String] -> Attributed Block -> [P.Block]
 toPandocA anchors blk =
-  case title blk of
-    Just tt -> [P.Para [P.Strong [P.Str tt]], toPandoc anchors (content blk)]
-    Nothing -> [toPandoc anchors (content blk)]
+  let mbTitle = case title blk of
+                  Just tt -> [P.Para [P.Strong [P.Str tt]]]
+                  Nothing -> []
+      mbAnchor = case anchor blk of
+                  Just a -> [P.Para [P.Anchor a []]]
+                  Nothing -> []
+  in mbAnchor ++ mbTitle ++ [toPandoc anchors (content blk)]
 
 toPandoc :: [String] -> Block -> P.Block
 toPandoc _ (Header n str) = P.Header n [P.Str str]
@@ -643,9 +647,8 @@ pandocInline _ (Quoted qt s) =
       Superscript -> [P.Space, P.Superscript [P.Str s]]
 pandocInline anchors (InternalLink h t) =
     if h `elem` anchors
---       then [P.Space, P.Link [P.Str t] ("#"++h,"")] -- Pandoc does not support internal links :(
-      then [P.Space, P.Str t]                         -- so just put link title
-      else [P.Space, P.Link [P.Str t] (getLink h,"")] -- try to support external links
+      then [P.Space, P.InternalLink [P.Str t] h]
+      else [P.Space, P.Str t]
 
 getLinkFile :: String -> String
 getLinkFile href = dropExtension f
