@@ -126,6 +126,8 @@ data Inline
     | Image [Inline] Target -- ^ Image:  alt text (list of inlines), target
                             -- and target
     | Note [Block]          -- ^ Footnote or endnote 
+    | Anchor String [Inline] -- ^ Anchor for internal links: anchor ID, anchor text (may be empty)
+    | InternalLink [Inline] String -- ^ Internal link: link text, link anchor
     deriving (Show, Eq, Ord, Read, Typeable, Data)
 
 -- | Applies a transformation on @a@s to matching elements in a @b@.
