@@ -92,7 +92,7 @@ data Block  = Header Int String
             | NumberedList [TextLine]
             | DefList [(TextLine,TextLine)]
             | Table [Cell] [[Cell]]
-            | Delimited Char [TextLine]
+            | Delimited Char [Attributed Block]
 
 instance Show Block where
   show (Header n h) = "\nH"++show n ++". "++h++"\n"
@@ -196,6 +196,13 @@ pPlainText = do
     optional whitespace
     return $ Text text
 
+pStartText :: Parser Inline
+pStartText = do
+    c <- noneOf "=-# \t\n\r"
+    text <- many $ noneOf " \t*#'~\n\r"
+    optional whitespace
+    return $ Text (c:text)
+
 pCellText :: Parser Inline
 pCellText = do
     text <- many1 $ noneOf "| \t*#'~\n\r"
@@ -224,12 +231,18 @@ pInternalLink = do
   return $ InternalLink href linkTitle
 
 inline ::  Parser Inline
-inline = do
---     many $ oneOf " \t"
-    (try pQuoted)
-    <|> (try pInternalLink)
-    <|> (try pMacro)
+inline = 
+        try pQuoted
+    <|> try pInternalLink
+    <|> try pMacro
     <|> pPlainText
+
+startInline :: Parser Inline
+startInline =
+        try pQuoted
+    <|> try pInternalLink
+    <|> try pMacro
+    <|> pStartText
 
 cellInline :: Parser Inline
 cellInline = try pQuoted
@@ -239,9 +252,10 @@ cellInline = try pQuoted
 
 pNormalLine ::  Parser [Inline]
 pNormalLine = do 
-  text <- many1 inline
+  i <- startInline
+  text <- many inline
   pNewLine
-  return text
+  return (i:text)
 
 pCommentLine ::  Parser [a]
 pCommentLine = do
@@ -285,7 +299,7 @@ pCode = do
 pParagraph ::  Parser Block
 pParagraph = do
     t <- concatP $ many1 pLine
-    many1 pNewLine'
+    many pNewLine'
     return $ Para t
 
 pCellParagraph :: Parser Block
@@ -313,6 +327,14 @@ pCellBlock = choice $ map try $ [
     pNumberedList,
     pDefList,
     pCode ]
+
+pNormalBlock :: Parser (Attributed Block)
+pNormalBlock = choice $ map (try . pAttributed) $ [
+    pTable,
+    const pNumberedList,
+    const pBulletedList,
+    const pDefList,
+    const pAnyParagraph ]
 
 pBulletedListItem ::  Char -> Parser ListItem
 pBulletedListItem c = do
@@ -380,8 +402,8 @@ pDelimitedBlock c = do
     let pDel = do
                string $ replicate n c
                pNewLine
-    pNewLine
-    lst <- pLine `manyTill` (try pDel)
+    many pNewLine
+    lst <- pNormalBlock `manyTill` (try pDel)
     many pNewLine
     return $ Delimited c lst
 
@@ -613,7 +635,7 @@ toPandoc _ (Code lst) = P.CodeBlock nullAttr $ intercalate "\n" lst
 toPandoc a (BulletedList lst) = P.BulletList $ map (pandocListItem a) lst
 toPandoc a (NumberedList lst) = P.OrderedList defListAttr [[P.Plain $ pandocInlineMap a item] | item <- lst]
 toPandoc a (DefList lst) = P.DefinitionList [(pandocInlineMap a t, [[P.Plain $ pandocInlineMap a d]]) | (t,d) <- lst]
-toPandoc a (Delimited _ lst) = P.BlockQuote [P.Plain $ pandocInlineMap a line | line <- lst]
+toPandoc a (Delimited _ lst) = P.BlockQuote $ map (toPandoc a . content) lst
 toPandoc a (Table hdr lst) = P.Table [] (map alignment $ head lst) [] (map pandocCell hdr) [[pandocCell cell | cell <- row] | row <- lst]
   where
     alignment (Cell _ _ _ h _ _ _) = alignment' h
