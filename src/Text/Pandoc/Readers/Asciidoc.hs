@@ -290,7 +290,8 @@ pParagraph = do
 
 pCellParagraph :: Parser Block
 pCellParagraph = do
-    t <- concatP $ many1 pNormalLine 
+    t <- many1 inline
+    many pNewLine
     return $ Para t
 
 pAdmParagraph ::  Parser Block
@@ -307,11 +308,11 @@ pAnyParagraph = (try pCode) <|> (try pAdmParagraph) <|> pParagraph
 pCellBlock :: Parser Block
 pCellBlock = choice $ map try $ [
     pCellParagraph,
-    pCode,
     pAdmParagraph,
     pBulletedList,
     pNumberedList,
-    pDefList ]
+    pDefList,
+    pCode ]
 
 pBulletedListItem ::  Char -> Parser ListItem
 pBulletedListItem c = do
@@ -431,7 +432,7 @@ pTwoLineHeader l c = do
 
 pTableDelimiter ::  Parser Int
 pTableDelimiter = do
-  char '|'
+  char '|' <?> "start table delimiter"
   d <- many1 $ char '='
   pNewLine
   return $ length d
@@ -472,11 +473,11 @@ pCell ::  Parser Cell
 pCell = do
     (colspan, rowspan, spantype) <- (option (1,1,'+') $ try pCellSpanSpec) <?> "cell span spec"
     (horalign,vertalign) <- (option ('<','^') $ try pCellAlign) <?> "cell align"
-    style <- option "default" $ try pCellStyle
+--     style <- option "default" $ try pCellStyle
     char '|' <?> "cell separator"
     cellContent <- try pCellMultiline <|> pCellInline
     many whitespace
-    return $ Cell colspan rowspan spantype horalign vertalign style cellContent
+    return $ Cell colspan rowspan spantype horalign vertalign "" cellContent
   where
     pCellInline = do
       whitespace
@@ -484,16 +485,18 @@ pCell = do
       many whitespace
       return [Para c]
     pCellMultiline = do
-      pNewLine
-      blocks <- ((try pCellBlock) `manyTill` (char '|')) <?> "blocks inside table cell"
---       many pNewLine
+      char '\n'
+      many $ oneOf " \t\r\n"
+      blocks <- ((try pCellBlock) `manyTill` (char '|' <?> "end of cell")) <?> "blocks inside table cell"
+--       optional pNewLine
       inp <- getInput
       setInput $ "\n|" ++ inp
       return blocks
 
 pTableRow ::  Parser [Cell]
 pTableRow = do
-  cells <- pCell `manyTill` pNewLine
+  cells <- many1 pCell
+  pNewLine'
   return cells
 
 pTable :: Attributes -> Parser Block
