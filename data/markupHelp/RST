@@ -1,0 +1,50 @@
+~~~~~~~~
+Section heading
+===============
+
+Subsection
+----------
+
+Formatting: *italics*,
+**bold**.
+
+    Indented quotation
+
+Links:
+`external <http://foo.org>`_,
+`Wiki Link <>`_, |image|,
+`heading <#subsection>`_.
+
+.. |image| image::
+     /img/gitit-banner.png
+
+::
+
+    let a = 1:a in head a
+
+-  bulleted
+-  list
+
+---------------
+
+1.  ordered
+2.  list
+   
+    a. sublist (indent 4 spaces)
+    b. another
+
+3.  item three
+
+term
+    definition
+orange
+    orange fruit
+
+~~~~~~~~
+
+For more: [reST primer],
+[quick reference guide].
+
+[reST primer]: http://docutils.sourceforge.net/docs/user/rst/quickstart.html
+[quick reference guide]: http://docutils.sourceforge.net/docs/user/rst/quickref.html
+
