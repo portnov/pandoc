@@ -221,7 +221,7 @@ pMacro ::  Parser Inline
 pMacro = do
   name <- many1 alphaNum
   char ':'
-  arg1 <- many1 $ noneOf " \t\n\r["
+  arg1 <- many $ noneOf " \t\n\r["
   char '['
   args <- many $ noneOf "\n\r]"
   char ']'
@@ -453,6 +453,7 @@ pBlockTitle ::  Parser [Char]
 pBlockTitle = do
   char '.' <?> "block title marker"
   blockTitle <- anyChar `manyTill` pNewLine
+  optional pNewLine
   return blockTitle
   
 pAttributed :: (Attributes -> Parser t) -> Parser (Attributed t)
@@ -703,6 +704,7 @@ pandocInline _ (Macro name arg args) =
     case name of
       "link" -> [P.Space, P.Link (map P.Str args) (getLinkFile arg,"")]
       "image" -> [P.Image (map P.Str args) (getImg arg,"")]
+      "footnote" -> [P.Note [P.Plain $ map P.Str args]]
       "include" -> [P.Space, P.Link [P.Str "Include:",P.Space, P.Str $ tail arg] (dropExtension $ tail arg,"")]
       _ -> []
 pandocInline _ (Quoted qt s) = 
