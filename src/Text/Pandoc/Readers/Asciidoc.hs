@@ -69,14 +69,22 @@ instance Show Inline where
 
 type TextLine = [Inline]
 
-data ListItem = ListItem { lstLevel :: Int, lstLine :: TextLine }
-    deriving (Show)
+data (Eq a, Ord a) => ListItem a =
+  ListItem {
+    lstStyle :: P.ListNumberStyle,
+    lstDelim :: P.ListNumberDelim,
+    lstLevel :: a,
+    lstLine :: TextLine }
+  deriving (Show)
 
-data ListNode = ListNode TextLine [ListNode] -- ^ Item itself, item's children
-    deriving (Show)
-
-lstChildren :: ListNode -> [ListNode]
-lstChildren (ListNode _ list) = list
+data ListNode =
+  ListNode {
+    nodeStyle :: P.ListNumberStyle, -- ^ Item style
+    nodeDelim :: P.ListNumberDelim, -- ^ Delimiter
+    nodeLine :: TextLine,           
+    nodeChildren :: [ListNode]      -- ^ Children items
+  } 
+  deriving (Show)
 
 data QuoteType = Strong | Emphasis | Unquoted | Strikeout | Mono | Superscript
     deriving (Show)
@@ -89,7 +97,7 @@ data Block  = Header Int String
             | AdmPara AdmType TextLine
             | Code [String]
             | BulletedList [ListNode]
-            | NumberedList [TextLine]
+            | NumberedList [ListNode]
             | DefList [(TextLine,TextLine)]
             | Table [Cell] [[Cell]]
             | Delimited Char [Attributed Block]
@@ -336,23 +344,31 @@ pNormalBlock = choice $ map (try . pAttributed) $ [
     const pDefList,
     const pAnyParagraph ]
 
-pBulletedListItem ::  Char -> Parser ListItem
+pBulletedListItem ::  Char -> Parser (ListItem Int)
 pBulletedListItem c = do
   indent
   cc <- many1 $ char c
   let n = length cc
   whitespace
   item <- inline `manyTill` pNewLine
-  return $ ListItem n item 
+  return $ ListItem P.DefaultStyle P.DefaultDelim n item 
 
-pNumberedListItem ::  Parser [Inline]
+pNumberedListItem ::  Parser (ListItem String)
 pNumberedListItem = do
-  indent
-  many1 digit
-  char '.'
-  whitespace
-  lst <- inline `manyTill` pNewLine
-  return lst
+    indent
+    (n, style) <- number <|> anyLetter <|> romanNumeral <|> bigRomanNumeral
+    delim <- char '.' <|> char ')'
+    whitespace
+    lst <- inline `manyTill` pNewLine
+    return $ ListItem style (delimStyle delim) n lst
+  where
+    number = (\x -> (x, P.Decimal)) `fmap` many1 digit
+    anyLetter = (\x -> ([x], P.LowerAlpha)) `fmap` letter
+    romanNumeral = (\x -> (x, P.LowerRoman)) `fmap` (many1 $ oneOf "ivx")
+    bigRomanNumeral = (\x -> (x, P.UpperRoman)) `fmap` (many1 $ oneOf "IVX")
+
+    delimStyle '.' = P.Period
+    delimStyle _   = P.OneParen
 
 pDefListItem ::  Parser ([Inline], [Inline])
 pDefListItem = do
@@ -362,8 +378,12 @@ pDefListItem = do
   def <- pLine
   return (term, def)
 
-unfoldTree ::  (a -> (TextLine, [a])) -> a -> ListNode
-unfoldTree g = uncurry ListNode . second (map (unfoldTree g)) . g
+unfoldTree ::  (a -> (P.ListNumberStyle, P.ListNumberDelim, TextLine, [a])) -> a -> ListNode
+unfoldTree g a = 
+  let (style, delim, line, lst) = g a
+  in ListNode style delim line (map (unfoldTree g) lst)
+
+-- uncurry ListNode . second (map (unfoldTree g)) . g
 
 splitBy ::  (a -> Bool) -> [a] -> [[a]]
 splitBy _ [] = []
@@ -371,23 +391,37 @@ splitBy p s  = filter (not . null) $ unfoldr (\c -> if null c
                                                     then Nothing
                                                     else Just $ first (head c :) $ break p $ tail c) s
 
-sameLevel ::  ListItem -> ListItem -> Bool
+sameLevel :: (Ord a) => ListItem a -> ListItem a -> Bool
 sameLevel = (==) `on` lstLevel
 
-listTransform ::  [ListItem] -> [ListNode]
-listTransform = lstChildren . unfoldTree (\(s:ss) -> (lstLine s, splitBy (sameLevel (head ss)) ss)) . (ListItem 0 []:)
+sameKind :: ListItem String -> ListItem String -> Bool
+sameKind = (==) `on` (kind . head . lstLevel)
+  where
+    kind :: Char -> Int
+    kind c | c `elem` "0123456789" = 1
+           | c `elem` "ivx"        = 2
+           | c `elem` "IVX"        = 3
+           | otherwise             = 4
+
+listTransform :: (Ord a) => (ListItem a -> ListItem a -> Bool) -> a -> [ListItem a] -> [ListNode]
+listTransform cmp zero = nodeChildren . unfoldTree (\(s:ss) -> (lstStyle s, lstDelim s, lstLine s, splitBy (cmp (head ss)) ss)) . (ListItem P.DefaultStyle P.DefaultDelim zero []:)
 
 pBulletedList ::  Parser Block
 pBulletedList = do
     lst <- choice $ map many1 $ [pBulletedListItem '*', pBulletedListItem '-', pBulletedListItem '.']
     many pNewLine
-    return $ BulletedList $ listTransform lst
+    return $ BulletedList $ listTransform sameLevel 0 lst
 
 pNumberedList ::  Parser Block
 pNumberedList = do
+    lst <- pNumberedList'
+    return $ NumberedList $ listTransform sameKind "0" lst
+
+pNumberedList' :: Parser [ListItem String]
+pNumberedList' = do
     lst <- many1 pNumberedListItem
     many1 pNewLine
-    return $ NumberedList lst
+    return lst
 
 pDefList ::  Parser Block
 pDefList = do
@@ -610,12 +644,21 @@ pandoc (h, preamble,lst) = P.Pandoc meta $ concatMap (toPandocA anchors) lst
 nullAttr ::  (String, [a], [a1])
 nullAttr = ("",[],[])
 
-defListAttr ::  (Int, P.ListNumberStyle, P.ListNumberDelim)
+defListAttr ::  P.ListAttributes
 defListAttr = (1, P.DefaultStyle, P.DefaultDelim)
 
 pandocListItem :: [String] -> ListNode -> [P.Block]
-pandocListItem a (ListNode item []) = [P.Plain $ pandocInlineMap a item]
-pandocListItem a (ListNode item children) = [P.Plain $ pandocInlineMap a item, P.BulletList $ map (pandocListItem a) children]
+pandocListItem a (ListNode _ _ item []) = [P.Plain $ pandocInlineMap a item]
+pandocListItem a (ListNode _ _ item children) = [P.Plain $ pandocInlineMap a item, P.BulletList $ map (pandocListItem a) children]
+
+orderedList :: [String] -> [ListNode] -> P.Block
+orderedList a nodes = P.OrderedList listAttr blocks
+  where
+    listAttr = (1, nodeStyle $ head nodes, nodeDelim $ head nodes)
+    blocks = map toBlocks nodes
+    toBlocks (ListNode _ _ item []) = [P.Plain $ pandocInlineMap a item]
+    toBlocks (ListNode _ _ item children) =
+        [P.Plain $ pandocInlineMap a item, orderedList a children]
 
 toPandocA :: [String] -> Attributed Block -> [P.Block]
 toPandocA anchors blk =
@@ -633,7 +676,7 @@ toPandoc a (Para lst) = P.Para $ pandocInlineMap a lst
 toPandoc a (AdmPara t lst) = P.BlockQuote [P.Para $ [P.Strong [P.Str $ show t], P.Str ":", P.Space] ++ pandocInlineMap a lst]
 toPandoc _ (Code lst) = P.CodeBlock nullAttr $ intercalate "\n" lst
 toPandoc a (BulletedList lst) = P.BulletList $ map (pandocListItem a) lst
-toPandoc a (NumberedList lst) = P.OrderedList defListAttr [[P.Plain $ pandocInlineMap a item] | item <- lst]
+toPandoc a (NumberedList lst) = orderedList a lst
 toPandoc a (DefList lst) = P.DefinitionList [(pandocInlineMap a t, [[P.Plain $ pandocInlineMap a d]]) | (t,d) <- lst]
 toPandoc a (Delimited _ lst) = P.BlockQuote $ map (toPandoc a . content) lst
 toPandoc a (Table hdr lst) = P.Table [] (map alignment $ head lst) [] (map pandocCell hdr) [[pandocCell cell | cell <- row] | row <- lst]
