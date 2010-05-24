@@ -14,19 +14,20 @@ import Data.Function (on)
 import qualified Data.Map as M
 
 import Text.ParserCombinators.Parsec
--- import qualified Text.Pandoc as Pandoc
 import qualified Text.Pandoc.Definition as P
 import Text.Pandoc.Shared (ParserState)
 
-data Author = Author { firstName :: String, secondName :: String, surName :: String, email :: String }
+-- | First name, second name, surname, email
+data Author = Author String String String String
 
 nobody ::  Author
 nobody = Author "" "" "" ""
 
 instance Show Author where
-  show (Author fst snd sur em) = fst ++ " " ++ snd ++ " " ++ sur ++ " <"++em++">"
+  show (Author fname sname sur em) = fname ++ " " ++ sname ++ " " ++ sur ++ " <"++em++">"
 
-data Version = Version { vNumber :: String, vDate :: String, vDescr :: String }
+-- | version number, date, description
+data Version = Version String String String
     deriving (Show)
 data Preamble = Preamble (Maybe Author) (Maybe Version)
     deriving (Show)
@@ -52,9 +53,9 @@ instance (Show a) => Show (Attributed a) where
     showAtts [] = ""
     showAtts lst = show lst
 
-data Inline = Macro { macroName :: String, macroArg :: String, macroArgs :: [String] }
+data Inline = Macro String String [String] -- ^ macro name, first arg, other args
             | Quoted QuoteType String
-            | InternalLink String String
+            | InternalLink String String   -- ^ link target, link text
             | Text String
 
 data Cell = Cell Int Int Char Char Char String [Block]
@@ -71,8 +72,11 @@ type TextLine = [Inline]
 data ListItem = ListItem { lstLevel :: Int, lstLine :: TextLine }
     deriving (Show)
 
-data ListNode = ListNode { lstItem :: TextLine, lstChildren :: [ListNode]}
+data ListNode = ListNode TextLine [ListNode] -- ^ Item itself, item's children
     deriving (Show)
+
+lstChildren :: ListNode -> [ListNode]
+lstChildren (ListNode _ list) = list
 
 data QuoteType = Strong | Emphasis | Unquoted | Strikeout | Mono | Superscript
     deriving (Show)
@@ -88,7 +92,7 @@ data Block  = Header Int String
             | NumberedList [TextLine]
             | DefList [(TextLine,TextLine)]
             | Table [Cell] [[Cell]]
-            | Delimited Char [TextLine]
+            | Delimited Char [Attributed Block]
 
 instance Show Block where
   show (Header n h) = "\nH"++show n ++". "++h++"\n"
@@ -192,6 +196,13 @@ pPlainText = do
     optional whitespace
     return $ Text text
 
+pStartText :: Parser Inline
+pStartText = do
+    c <- noneOf "=-# \t\n\r"
+    text <- many $ noneOf " \t*#'~\n\r"
+    optional whitespace
+    return $ Text (c:text)
+
 pCellText :: Parser Inline
 pCellText = do
     text <- many1 $ noneOf "| \t*#'~\n\r"
@@ -214,18 +225,24 @@ pInternalLink = do
   string "<<"
   href <- many1 $ noneOf ",\n"
   char ','
-  title <- many1 $ noneOf ">\n"
+  linkTitle <- many1 $ noneOf ">\n"
   string ">>"
   optional whitespace
-  return $ InternalLink href title
+  return $ InternalLink href linkTitle
 
 inline ::  Parser Inline
-inline = do
---     many $ oneOf " \t"
-    (try pQuoted)
-    <|> (try pInternalLink)
-    <|> (try pMacro)
+inline = 
+        try pQuoted
+    <|> try pInternalLink
+    <|> try pMacro
     <|> pPlainText
+
+startInline :: Parser Inline
+startInline =
+        try pQuoted
+    <|> try pInternalLink
+    <|> try pMacro
+    <|> pStartText
 
 cellInline :: Parser Inline
 cellInline = try pQuoted
@@ -235,9 +252,10 @@ cellInline = try pQuoted
 
 pNormalLine ::  Parser [Inline]
 pNormalLine = do 
-  text <- many1 inline
+  i <- startInline
+  text <- many inline
   pNewLine
-  return text
+  return (i:text)
 
 pCommentLine ::  Parser [a]
 pCommentLine = do
@@ -281,12 +299,13 @@ pCode = do
 pParagraph ::  Parser Block
 pParagraph = do
     t <- concatP $ many1 pLine
-    many1 pNewLine'
+    many pNewLine'
     return $ Para t
 
 pCellParagraph :: Parser Block
 pCellParagraph = do
-    t <- concatP $ many1 pNormalLine 
+    t <- many1 inline
+    many pNewLine
     return $ Para t
 
 pAdmParagraph ::  Parser Block
@@ -295,7 +314,7 @@ pAdmParagraph = do
     whitespace
     text <- concatP $ many1 pLine
     many1 pNewLine
-    return $ AdmPara (read t) text
+    return $ AdmPara (read $ init t) text
 
 pAnyParagraph ::  Parser Block
 pAnyParagraph = (try pCode) <|> (try pAdmParagraph) <|> pParagraph
@@ -303,11 +322,19 @@ pAnyParagraph = (try pCode) <|> (try pAdmParagraph) <|> pParagraph
 pCellBlock :: Parser Block
 pCellBlock = choice $ map try $ [
     pCellParagraph,
-    pCode,
     pAdmParagraph,
     pBulletedList,
     pNumberedList,
-    pDefList ]
+    pDefList,
+    pCode ]
+
+pNormalBlock :: Parser (Attributed Block)
+pNormalBlock = choice $ map (try . pAttributed) $ [
+    pTable,
+    const pNumberedList,
+    const pBulletedList,
+    const pDefList,
+    const pAnyParagraph ]
 
 pBulletedListItem ::  Char -> Parser ListItem
 pBulletedListItem c = do
@@ -340,9 +367,9 @@ unfoldTree g = uncurry ListNode . second (map (unfoldTree g)) . g
 
 splitBy ::  (a -> Bool) -> [a] -> [[a]]
 splitBy _ [] = []
-splitBy p s  = filter (not . null) $ unfoldr (\s -> if null s
+splitBy p s  = filter (not . null) $ unfoldr (\c -> if null c
                                                     then Nothing
-                                                    else Just $ first (head s :) $ break p $ tail s) s
+                                                    else Just $ first (head c :) $ break p $ tail c) s
 
 sameLevel ::  ListItem -> ListItem -> Bool
 sameLevel = (==) `on` lstLevel
@@ -375,8 +402,8 @@ pDelimitedBlock c = do
     let pDel = do
                string $ replicate n c
                pNewLine
-    pNewLine
-    lst <- pLine `manyTill` (try pDel)
+    many pNewLine
+    lst <- pNormalBlock `manyTill` (try pDel)
     many pNewLine
     return $ Delimited c lst
 
@@ -391,8 +418,8 @@ pAnyDelimitedBlock =
 pBlockTitle ::  Parser [Char]
 pBlockTitle = do
   char '.' <?> "block title marker"
-  title <- anyChar `manyTill` pNewLine
-  return title
+  blockTitle <- anyChar `manyTill` pNewLine
+  return blockTitle
   
 pAttributed :: (Attributes -> Parser t) -> Parser (Attributed t)
 pAttributed p = do
@@ -427,7 +454,7 @@ pTwoLineHeader l c = do
 
 pTableDelimiter ::  Parser Int
 pTableDelimiter = do
-  char '|'
+  char '|' <?> "start table delimiter"
   d <- many1 $ char '='
   pNewLine
   return $ length d
@@ -470,9 +497,9 @@ pCell = do
     (horalign,vertalign) <- (option ('<','^') $ try pCellAlign) <?> "cell align"
 --     style <- option "default" $ try pCellStyle
     char '|' <?> "cell separator"
-    content <- try pCellMultiline <|> pCellInline
+    cellContent <- try pCellMultiline <|> pCellInline
     many whitespace
-    return $ Cell colspan rowspan spantype horalign vertalign "" content
+    return $ Cell colspan rowspan spantype horalign vertalign "" cellContent
   where
     pCellInline = do
       whitespace
@@ -480,16 +507,18 @@ pCell = do
       many whitespace
       return [Para c]
     pCellMultiline = do
-      pNewLine
-      blocks <- ((try pCellBlock) `manyTill` (char '|')) <?> "blocks inside table cell"
---       many pNewLine
+      char '\n'
+      many $ oneOf " \t\r\n"
+      blocks <- ((try pCellBlock) `manyTill` (char '|' <?> "end of cell")) <?> "blocks inside table cell"
+--       optional pNewLine
       inp <- getInput
       setInput $ "\n|" ++ inp
       return blocks
 
 pTableRow ::  Parser [Cell]
 pTableRow = do
-  cells <- pCell `manyTill` pNewLine
+  cells <- many1 pCell
+  pNewLine'
   return cells
 
 pTable :: Attributes -> Parser Block
@@ -570,12 +599,13 @@ pandoc :: (Attributed Block, Maybe Preamble, [Attributed Block]) -> P.Pandoc
 pandoc (h, preamble,lst) = P.Pandoc meta $ concatMap (toPandocA anchors) lst
   where
     anchors = catMaybes $ map anchor lst
-    meta = P.Meta [P.Str title] [[P.Str $ show author]] [P.Str date]
-    Header _ title = content h
+    meta = P.Meta [P.Str doctitle] [[P.Str $ show author]] [P.Str date]
+    Header _ doctitle = content h
     Version _ date _ = fromMaybe (Version "0.0" "" "") version
     (author, version) = case preamble of
-                          Just (Preamble (Just a) mv) -> (a,mv)
-                          Nothing -> (nobody,Nothing)
+                          Just (Preamble (Just a) mv) -> (a, mv)
+                          Just (Preamble Nothing mv) -> (nobody, mv)
+                          Nothing -> (nobody, Nothing)
 
 nullAttr ::  (String, [a], [a1])
 nullAttr = ("",[],[])
@@ -589,9 +619,13 @@ pandocListItem a (ListNode item children) = [P.Plain $ pandocInlineMap a item, P
 
 toPandocA :: [String] -> Attributed Block -> [P.Block]
 toPandocA anchors blk =
-  case title blk of
-    Just tt -> [P.Para [P.Strong [P.Str tt]], toPandoc anchors (content blk)]
-    Nothing -> [toPandoc anchors (content blk)]
+  let mbTitle = case title blk of
+                  Just tt -> [P.Para [P.Strong [P.Str tt]]]
+                  Nothing -> []
+      mbAnchor = case anchor blk of
+                  Just a -> [P.Para [P.Anchor a []]]
+                  Nothing -> []
+  in mbAnchor ++ mbTitle ++ [toPandoc anchors (content blk)]
 
 toPandoc :: [String] -> Block -> P.Block
 toPandoc _ (Header n str) = P.Header n [P.Str str]
@@ -601,7 +635,7 @@ toPandoc _ (Code lst) = P.CodeBlock nullAttr $ intercalate "\n" lst
 toPandoc a (BulletedList lst) = P.BulletList $ map (pandocListItem a) lst
 toPandoc a (NumberedList lst) = P.OrderedList defListAttr [[P.Plain $ pandocInlineMap a item] | item <- lst]
 toPandoc a (DefList lst) = P.DefinitionList [(pandocInlineMap a t, [[P.Plain $ pandocInlineMap a d]]) | (t,d) <- lst]
-toPandoc a (Delimited c lst) = P.BlockQuote [P.Plain $ pandocInlineMap a line | line <- lst]
+toPandoc a (Delimited _ lst) = P.BlockQuote $ map (toPandoc a . content) lst
 toPandoc a (Table hdr lst) = P.Table [] (map alignment $ head lst) [] (map pandocCell hdr) [[pandocCell cell | cell <- row] | row <- lst]
   where
     alignment (Cell _ _ _ h _ _ _) = alignment' h
@@ -609,8 +643,7 @@ toPandoc a (Table hdr lst) = P.Table [] (map alignment $ head lst) [] (map pando
     alignment' '>' = P.AlignRight
     alignment' '^' = P.AlignCenter
     alignment' _ = P.AlignLeft
-    pandocCell (Cell _ _ _ _ _ _ lst) = cell' lst
---     cell' lst = [P.Plain $ pandocInlineMap a lst]
+    pandocCell (Cell _ _ _ _ _ _ cells) = cell' cells
     cell' blocks = map (toPandoc a) blocks
 
 pandocInlineMap :: [String] -> [Inline] -> [P.Inline]
@@ -639,9 +672,8 @@ pandocInline _ (Quoted qt s) =
       Superscript -> [P.Space, P.Superscript [P.Str s]]
 pandocInline anchors (InternalLink h t) =
     if h `elem` anchors
---       then [P.Space, P.Link [P.Str t] ("#"++h,"")] -- Pandoc does not support internal links :(
-      then [P.Space, P.Str t]                         -- so just put link title
-      else [P.Space, P.Link [P.Str t] (getLink h,"")] -- try to support external links
+      then [P.Space, P.InternalLink [P.Str t] h]
+      else [P.Space, P.Str t]
 
 getLinkFile :: String -> String
 getLinkFile href = dropExtension f

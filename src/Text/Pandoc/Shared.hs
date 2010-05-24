@@ -949,6 +949,8 @@ inlineListToIdentifier =
               Link lst _      -> concatMap extractText lst
               Image lst _     -> concatMap extractText lst
               Note _          -> ""
+              Anchor _ lst    -> concatMap extractText lst
+              InternalLink lst _ -> concatMap extractText lst
 
 -- | Convert list of Pandoc blocks into (hierarchical) list of Elements
 hierarchicalize :: [Block] -> [Element]
