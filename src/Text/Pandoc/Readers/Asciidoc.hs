@@ -358,7 +358,7 @@ pBulletedListItem c = do
 pNumberedListItem ::  Parser (ListItem String)
 pNumberedListItem = do
     indent
-    (n, style) <- number <|> anyLetter <|> romanNumeral <|> bigRomanNumeral
+    (n, style) <- number <|> romanNumeral <|> bigRomanNumeral <|> anyLetter
     delim <- char '.' <|> char ')'
     whitespace
     lst <- inline `manyTill` pNewLine
@@ -704,7 +704,7 @@ pandocInline :: [String] -> Inline -> [P.Inline]
 pandocInline _ (Text s) = [P.Space, P.Str s]
 pandocInline _ (Macro name arg args) = 
     case name of
-      "link" -> [P.Space, P.Link (map P.Str args) (getLinkFile arg,"")]
+      "link" -> [P.Space, P.Link (map P.Str args) (arg,"")]
       "image" -> [P.Image (map P.Str args) (getImg arg,"")]
       "footnote" -> [P.Note [P.Plain $ map P.Str args]]
       "include" -> [P.Space, P.Link [P.Str "Include:",P.Space, P.Str $ tail arg] (dropExtension $ tail arg,"")]
@@ -721,16 +721,6 @@ pandocInline anchors (InternalLink h t) =
     if h `elem` anchors
       then [P.Space, P.InternalLink [P.Str t] h]
       else [P.Space, P.Str t]
-
-getLinkFile :: String -> String
-getLinkFile href = dropExtension f
-  where
-    (f,_) = span (/='#') href
-
-getLink :: String -> String
-getLink href = (dropExtension f) ++ a
-  where
-    (f,a) = span (/='#') href
 
 -- removeComments :: String -> String
 -- removeComments = unlines . map removeComment . lines
