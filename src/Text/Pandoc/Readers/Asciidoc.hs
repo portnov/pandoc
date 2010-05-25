@@ -17,6 +17,8 @@ import Text.ParserCombinators.Parsec
 import qualified Text.Pandoc.Definition as P
 import Text.Pandoc.Shared (ParserState)
 
+type Asciidoc = (Attributed Block, Maybe Preamble, [Attributed Block])
+
 -- | First name, second name, surname, email
 data Author = Author String String String String
 
@@ -623,7 +625,7 @@ body = many1 $ choice $ map (try . pAttributed) [
     const pAnyDelimitedBlock,
     const pAnyParagraph ]
 
-asciidoc :: Parser (Attributed Block, Maybe Preamble, [Attributed Block])
+asciidoc :: Parser Asciidoc
 asciidoc = do
     pp <- maybeP pDocumentHeader
     let (h,p) = fromMaybe (untitled, Nothing) pp
@@ -742,10 +744,24 @@ removeComments = unlines . filter isNotComment . lines
     isNotComment ('/':'/':_) = False
     isNotComment _           = True
 
+robustParse :: Parser Asciidoc -> SourceName -> String -> Asciidoc
+robustParse p src x = 
+  case parse p' src x of
+    Right (y,[]) -> y
+    Right ((hdr,preamble,blocks), rest) -> (hdr,preamble, blocks ++ errBlocks rest)
+    Left e -> (errHdr,Nothing, [woAttributes $ Para [Text $ show e]])
+  where
+    errHdr = woAttributes $ Header 1 "Parsing error occured"
+    errBlocks text = map woAttributes [Para [Quoted Strong "Cannot parse following markup:"], Para [Text text]]
+
+    p' = do
+      x <- p
+      inp <- getInput
+      return (x,inp)
+
 readAsciidoc :: ParserState -> String -> P.Pandoc
-readAsciidoc _ text = case parse asciidoc "<input>" text' of
-    Left e -> error $ show e
-    Right x -> pandoc x
+readAsciidoc _ text =
+    pandoc $ robustParse asciidoc "<input>" text' 
   where
     text' = removeComments (text ++ "\n\n")
 
