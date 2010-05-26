@@ -79,7 +79,6 @@ confInline (Quoted t lst) = quoteWith qt lst
   where qt = case t of
               SingleQuote -> "'"
               DoubleQuote -> "\""
-confInline (Cite _ _) = undefined
 confInline (Code s) = s                -- !?
 confInline Space = " "
 confInline EmDash = "---"
@@ -93,5 +92,8 @@ confInline (HtmlInline s) = s
 confInline (Link title (url,_)) = "["++confInlines title++"|"++url++"]"
 confInline (Image _ (url,_)) = "!"++url++"!"
 confInline (Note blocks) = confBlocks blocks
+confInline (Anchor target _) = "{anchor:" ++ target ++ "}"
+confInline (InternalLink text target) = "[" ++ confInlines text ++ "|#" ++ target ++ "]"
+confInline x = error $ "Unsupported inline: " ++ show x
 
 
