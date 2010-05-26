@@ -704,6 +704,10 @@ pandocInline :: [String] -> Inline -> [P.Inline]
 pandocInline _ (Text s) = [P.Space, P.Str s]
 pandocInline _ (Macro name arg args) = 
     case name of
+      "http" -> 
+        let text | null (concat args) = ["http:"++arg]
+                 | otherwise          = args
+        in [P.Space, P.Link (map P.Str text) ("http:"++arg,"")]
       "link" -> [P.Space, P.Link (map P.Str args) (arg,"")]
       "image" -> [P.Image (map P.Str args) (getImg arg,"")]
       "footnote" -> [P.Note [P.Plain $ map P.Str args]]
