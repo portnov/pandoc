@@ -7,7 +7,7 @@ import Prelude hiding (getContents,print, putStrLn)
 import System.FilePath (dropExtension)
 import Control.Arrow
 import Control.Monad (when,liftM)
-import Data.Char
+import Data.Char hiding (Space)
 import Data.Maybe
 import Data.List
 import Data.Function (on)
@@ -58,7 +58,9 @@ instance (Show a) => Show (Attributed a) where
 data Inline = Macro String String [String] -- ^ macro name, first arg, other args
             | Quoted QuoteType String
             | InternalLink String String   -- ^ link target, link text
-            | Text String
+            | Text String                  -- ^ Just a text
+            | Punctuation String           -- ^ Punctuation; do not surround with spaces
+            | Space
 
 data Cell = Cell Int Int Char Char Char String [Block]
     deriving (Show)
@@ -68,6 +70,8 @@ instance Show Inline where
   show (Quoted t s) = "<"++show t++" "++s++">"
   show (InternalLink h t) = "<<"++h++","++t++">>"
   show (Text s) = s
+  show (Punctuation s) = s
+  show Space = " "
 
 type TextLine = [Inline]
 
@@ -106,7 +110,7 @@ data Block  = Header Int String
 
 instance Show Block where
   show (Header n h) = "\nH"++show n ++". "++h++"\n"
-  show (Para lst) = "P:" ++ showL lst
+  show (Para lst) = "P:" ++ concatMap show lst
   show (AdmPara t lst) = show t ++ ": " ++ showL lst
   show (Code lst) = "\n"++intercalate "\n" lst ++ "\n"
   show (BulletedList lst) = "\n{"++ concatMap (\l -> " * "++show l++"\n") lst ++ "}\n"
@@ -118,6 +122,15 @@ instance Show Block where
 
 showL ::  (Show a) => [a] -> String
 showL lst = intercalate " " (map show lst)++"\n"
+
+showP :: [P.Block] -> String
+showP = concatMap showP1
+  where
+    showP1 (P.Para xs) = concatMap showI xs
+    showP1 y = show y
+
+    showI (P.Str x) = x
+    showI y = show y
 
 maybeP ::  GenParser tok st a -> GenParser tok st (Maybe a)
 maybeP p = 
@@ -201,17 +214,27 @@ pAnchor = do
   return text
 
 pPlainText ::  Parser Inline
-pPlainText = do
-    text <- many1 $ noneOf " \t*#'~\n\r"
-    optional whitespace
-    return $ Text text
+pPlainText = try punctuation <|> simpleText
+  where
+    simpleText = do
+      text <- many1 $ noneOf " \t*#'~\n\r"
+      optional whitespace
+      return $ Text text
+
+punctuation :: Parser Inline
+punctuation = do
+  c <- oneOf "()[]{},./:"
+  optional whitespace
+  return $ Punctuation [c]
 
 pStartText :: Parser Inline
-pStartText = do
-    c <- noneOf "=-# \t\n\r"
-    text <- many $ noneOf " \t*#'~\n\r"
-    optional whitespace
-    return $ Text (c:text)
+pStartText = try punctuation <|> simpleText
+  where
+    simpleText = do
+      c <- noneOf "=-# \t\n\r"
+      text <- many $ noneOf " \t*#'~\n\r"
+      optional whitespace
+      return $ Text (c:text)
 
 pCellText :: Parser Inline
 pCellText = do
@@ -375,8 +398,7 @@ pNumberedListItem = do
 pDefListItem ::  Parser ([Inline], [Inline])
 pDefListItem = do
   term <- inline `manyTill` (string "::")
-  whitespace
-  optional (pNewLine >> (many $ oneOf " \t"))
+  whitespace <|> pNewLine
   def <- pLine
   return (term, def)
 
@@ -627,6 +649,7 @@ body = many1 $ choice $ map (try . pAttributed) [
 
 asciidoc :: Parser Asciidoc
 asciidoc = do
+    many pNewLine
     pp <- maybeP pDocumentHeader
     let (h,p) = fromMaybe (untitled, Nothing) pp
     lst <- body
@@ -693,7 +716,28 @@ toPandoc a (Table hdr lst) = P.Table [] (map alignment $ head lst) [] (map pando
     cell' blocks = map (toPandoc a) blocks
 
 pandocInlineMap :: [String] -> [Inline] -> [P.Inline]
-pandocInlineMap ans = concatMap (pandocInline ans)
+pandocInlineMap ans inlines = concat $ map (pandocInline ans) $ addSpaces inlines
+
+addSpaces :: [Inline] -> [Inline]
+addSpaces [] = []
+addSpaces [x] = [x]
+addSpaces (p@(Punctuation q):t:xs) | isText t = res ++ addSpaces (t: xs)
+  where
+    res | head q `elem` "([{" = [Space, p]
+        | otherwise           = [p, Space]
+addSpaces (t: p@(Punctuation q): xs) | isText t = res ++ addSpaces xs
+  where
+    res | head q `elem` "([{" = [t, Space, p]
+        | otherwise           = [t, p, Space]
+addSpaces (a:b:xs) | isText a && isText b = a: Space: addSpaces (b: xs)
+addSpaces (x:xs) = x: addSpaces xs
+
+isText :: Inline -> Bool
+isText (Text _) = True
+isText (Quoted _ _) = True
+isText (Macro _ _ _) = True
+isText (InternalLink _ _) = True
+isText _ = False
 
 getImg :: String -> String
 getImg "" = ""
@@ -701,30 +745,32 @@ getImg (':':s) = '/':s
 getImg s = '/': s
 
 pandocInline :: [String] -> Inline -> [P.Inline]
-pandocInline _ (Text s) = [P.Space, P.Str s]
+pandocInline _ (Text s) = [P.Str s]
+pandocInline _ (Punctuation s) = [P.Str s]
+pandocInline _ Space = [P.Space]
 pandocInline _ (Macro name arg args) = 
     case name of
       "http" -> 
         let text | null (concat args) = ["http:"++arg]
                  | otherwise          = args
-        in [P.Space, P.Link (map P.Str text) ("http:"++arg,"")]
-      "link" -> [P.Space, P.Link (map P.Str args) (arg,"")]
+        in [P.Link (map P.Str text) ("http:"++arg,"")]
+      "link" -> [P.Link (map P.Str args) (arg,"")]
       "image" -> [P.Image (map P.Str args) (getImg arg,"")]
       "footnote" -> [P.Note [P.Plain $ map P.Str args]]
-      "include" -> [P.Space, P.Link [P.Str "Include:",P.Space, P.Str $ tail arg] (dropExtension $ tail arg,"")]
+      "include" -> [P.Link [P.Str "Include:",P.Space, P.Str $ tail arg] (dropExtension $ tail arg,"")]
       _ -> []
 pandocInline _ (Quoted qt s) = 
     case qt of
-      Strong -> [P.Space,P.Strong [P.Str s]]
-      Strikeout -> [P.Space,P.Strikeout [P.Str s]]
-      Emphasis -> [P.Space,P.Emph [P.Str s]]
-      Unquoted -> [P.Space,P.Str s]
-      Mono -> [P.Space, P.Code s]
-      Superscript -> [P.Space, P.Superscript [P.Str s]]
+      Strong -> [P.Strong [P.Str s]]
+      Strikeout -> [P.Strikeout [P.Str s]]
+      Emphasis -> [P.Emph [P.Str s]]
+      Unquoted -> [P.Str s]
+      Mono -> [P.Code s]
+      Superscript -> [P.Superscript [P.Str s]]
 pandocInline anchors (InternalLink h t) =
     if h `elem` anchors
-      then [P.Space, P.InternalLink [P.Str t] h]
-      else [P.Space, P.Str t]
+      then [P.InternalLink [P.Str t] h]
+      else [P.Str t]
 
 -- removeComments :: String -> String
 -- removeComments = unlines . map removeComment . lines
