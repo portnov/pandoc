@@ -101,7 +101,7 @@ data AdmType = NOTE | TIP | IMPORTANT | CAUTION | WARNING | TODO
 data Block  = Header Int String
             | Para TextLine
             | AdmPara AdmType TextLine
-            | Code [String]
+            | Code String [String]               -- ^ Class/style, code lines
             | BulletedList [ListNode]
             | NumberedList [ListNode]
             | DefList [(TextLine,TextLine)]
@@ -112,7 +112,7 @@ instance Show Block where
   show (Header n h) = "\nH"++show n ++". "++h++"\n"
   show (Para lst) = "P:" ++ concatMap show lst
   show (AdmPara t lst) = show t ++ ": " ++ showL lst
-  show (Code lst) = "\n"++intercalate "\n" lst ++ "\n"
+  show (Code _ lst) = "\n"++intercalate "\n" lst ++ "\n"
   show (BulletedList lst) = "\n{"++ concatMap (\l -> " * "++show l++"\n") lst ++ "}\n"
   show (NumberedList lst) = "\n"++ concatMap (\l -> " # "++show l++"\n") lst ++ "\n"
   show (DefList lst) = "\n"++ concatMap (\(t,d) -> show t++" :: "++show d++"\n") lst ++ "\n"
@@ -290,6 +290,12 @@ pNormalLine = do
   pNewLine
   return (i:text)
 
+simpleLine :: Parser String
+simpleLine = do
+  line <- anyChar `manyTill` oneOf "\n\r"
+  optional pNewLine
+  return line
+
 pCommentLine ::  Parser [a]
 pCommentLine = do
   string "//" <?> "comment start marker"
@@ -327,7 +333,7 @@ pCode ::  Parser Block
 pCode = do
   lst <- choice $ map (many1 . pCodeLine) [2..8]
   many1 pNewLine'
-  return $ Code lst
+  return $ Code "" lst
 
 pParagraph ::  Parser Block
 pParagraph = do
@@ -453,25 +459,32 @@ pDefList = do
     many1 pNewLine
     return $ DefList lst
 
-pDelimitedBlock ::  Char -> Parser Block
-pDelimitedBlock c = do
+pDelimitedBlock ::  Char -> Attributes -> Parser Block
+pDelimitedBlock c attrs = do
     del <- many1 (char c)
     let n = length del
     let pDel = do
                string $ replicate n c
                pNewLine
     many pNewLine
-    lst <- pNormalBlock `manyTill` (try pDel)
-    many pNewLine
-    return $ Delimited c lst
+    case c of
+      '-' -> do
+        text <- simpleLine `manyTill` (try pDel)
+        many pNewLine
+        let style = fromMaybe "" $ lookup "style" attrs
+        return $ Code style text
+      _   -> do
+        lst <- pNormalBlock `manyTill` (try pDel)
+        many pNewLine
+        return $ Delimited c lst
 
-pAnyDelimitedBlock ::  Parser Block
-pAnyDelimitedBlock = 
-      (pDelimitedBlock '=') 
-  <|> (pDelimitedBlock '-')
-  <|> (pDelimitedBlock '~')
-  <|> (pDelimitedBlock '+')
-  <|> (pDelimitedBlock '/')
+pAnyDelimitedBlock :: Attributes -> Parser Block
+pAnyDelimitedBlock attrs = choice $ map try $ map ($ attrs) [
+    pDelimitedBlock '=',
+    pDelimitedBlock '-',
+    pDelimitedBlock '~',
+    pDelimitedBlock '+',
+    pDelimitedBlock '/' ]
 
 pBlockTitle ::  Parser [Char]
 pBlockTitle = do
@@ -644,7 +657,7 @@ body = many1 $ choice $ map (try . pAttributed) [
     const pNumberedList,
     const pBulletedList,
     const pDefList,
-    const pAnyDelimitedBlock,
+    pAnyDelimitedBlock,
     const pAnyParagraph ]
 
 asciidoc :: Parser Asciidoc
@@ -669,6 +682,9 @@ pandoc (h, preamble,lst) = P.Pandoc meta $ concatMap (toPandocA anchors) lst
 
 nullAttr ::  (String, [a], [a1])
 nullAttr = ("",[],[])
+
+codeAttrs :: String -> (String, [String], [a])
+codeAttrs style = ("", [style], [])
 
 defListAttr ::  P.ListAttributes
 defListAttr = (1, P.DefaultStyle, P.DefaultDelim)
@@ -700,7 +716,7 @@ toPandoc :: [String] -> Block -> P.Block
 toPandoc _ (Header n str) = P.Header n [P.Str str]
 toPandoc a (Para lst) = P.Para $ pandocInlineMap a lst
 toPandoc a (AdmPara t lst) = P.BlockQuote [P.Para $ [P.Strong [P.Str $ show t], P.Str ":", P.Space] ++ pandocInlineMap a lst]
-toPandoc _ (Code lst) = P.CodeBlock nullAttr $ intercalate "\n" lst
+toPandoc _ (Code style lst) = P.CodeBlock (codeAttrs style) $ intercalate "\n" lst
 toPandoc a (BulletedList lst) = P.BulletList $ map (pandocListItem a) lst
 toPandoc a (NumberedList lst) = orderedList a lst
 toPandoc a (DefList lst) = P.DefinitionList [(pandocInlineMap a t, [[P.Plain $ pandocInlineMap a d]]) | (t,d) <- lst]
