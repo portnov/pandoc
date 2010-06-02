@@ -167,6 +167,7 @@ Library
                    Text.Pandoc.ODT,
                    Text.Pandoc.Highlighting,
                    Text.Pandoc.Readers.Asciidoc,
+                   Text.Pandoc.Readers.Source,
                    Text.Pandoc.Readers.HTML,
                    Text.Pandoc.Readers.LaTeX,
                    Text.Pandoc.Readers.Markdown,
