@@ -59,6 +59,7 @@ module Text.Pandoc
                module Text.Pandoc.Definition
                -- * Readers: converting /to/ Pandoc format
                , readAsciidoc
+               , readSource
                , readMarkdown
                , readRST
                , readLaTeX
@@ -103,6 +104,7 @@ module Text.Pandoc
 import Text.Pandoc.Definition
 import Text.Pandoc.Readers.Markdown
 import Text.Pandoc.Readers.Asciidoc
+import Text.Pandoc.Readers.Source
 import Text.Pandoc.Readers.RST
 import Text.Pandoc.Readers.LaTeX
 import Text.Pandoc.Readers.HTML
