@@ -293,12 +293,18 @@ blockToOpenDocument o bs
       orderedList a b = do (ln,pn) <- newOrderedListStyle (isTightList b) a
                            inTags True "text:list" [ ("text:style-name", "L" ++ show ln)]
                                       <$> orderedListToOpenDocument o pn b
+      firstRowLen [] = 0
+      firstRowLen (x:_) = length x
+
       table c a w h r = do
         tn <- length <$> gets stTableStyles
         pn <- length <$> gets stParaStyles
         let  genIds      = map chr [65..]
              name        = "Table" ++ show (tn + 1)
-             columnIds   = zip genIds w
+             w' = if null w
+                    then replicate (firstRowLen r) 1.0
+                    else w
+             columnIds   = zip genIds w'
              mkColumn  n = selfClosingTag "table:table-column" [("table:style-name", name ++ "." ++ [fst n])]
              columns     = map mkColumn columnIds
              paraHStyles = paraTableStyles "Heading"  pn a
