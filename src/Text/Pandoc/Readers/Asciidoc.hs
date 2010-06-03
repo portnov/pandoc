@@ -466,7 +466,7 @@ pDelimitedBlock c attrs = do
     let pDel = do
                string $ replicate n c
                pNewLine
-    many pNewLine
+    many pNewLine'
     case c of
       '-' -> do
         text <- simpleLine `manyTill` (try pDel)
